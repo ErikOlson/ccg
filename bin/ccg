@@ -94,6 +94,90 @@ ccg_commit() {
     fi
 }
 
+# ccg remote: create GitHub repos with correct visibility and wire remotes.
+ccg_remote() {
+    ccg_require_root
+
+    if ! command -v gh >/dev/null 2>&1; then
+        echo "ccg: gh (GitHub CLI) is required for 'ccg remote'." >&2
+        echo "  Install: https://cli.github.com" >&2
+        exit 1
+    fi
+
+    if ! gh auth status >/dev/null 2>&1; then
+        echo "ccg: not logged into GitHub. Run: gh auth login" >&2
+        exit 1
+    fi
+
+    _name="$(basename "$CCG_ROOT")"
+    _prod_dir="$CCG_ROOT/.git"
+    _proc_dir="$CCG_PGIT_DIR/layers/process/.git"
+
+    _product_remote=$(git --git-dir="$_prod_dir" remote get-url origin 2>/dev/null || true)
+    _process_remote=$(git --git-dir="$_proc_dir" remote get-url origin 2>/dev/null || true)
+
+    if [ -n "$_product_remote" ] && [ -n "$_process_remote" ]; then
+        echo "ccg: remotes already configured."
+        echo "  product: $_product_remote"
+        echo "  claude:  $_process_remote"
+        exit 0
+    fi
+
+    if [ -z "$_product_remote" ]; then
+        echo "ccg: creating public product repo '$_name'..."
+        gh repo create "$_name" --public --source="$CCG_ROOT" --push
+    fi
+
+    if [ -z "$_process_remote" ]; then
+        _process_name="${_name}-process"
+        _owner=$(gh api user --jq .login)
+        echo "ccg: creating private claude repo '$_process_name'..."
+        gh repo create "$_process_name" --private
+
+        # Match the protocol the product remote uses (SSH vs HTTPS)
+        _prod_url=$(git --git-dir="$_prod_dir" remote get-url origin 2>/dev/null || true)
+        case "$_prod_url" in
+            git@*) _proc_url="git@github.com:$_owner/$_process_name.git" ;;
+            *)     _proc_url="https://github.com/$_owner/$_process_name.git" ;;
+        esac
+        git --git-dir="$_proc_dir" remote add origin "$_proc_url"
+
+        # Push if process repo has commits
+        if git --git-dir="$_proc_dir" rev-parse HEAD >/dev/null 2>&1; then
+            git --git-dir="$_proc_dir" --work-tree="$CCG_ROOT" push -u origin HEAD
+        fi
+    fi
+
+    echo "ccg: remotes configured."
+    echo "  product: $(git --git-dir="$_prod_dir" remote get-url origin 2>/dev/null || echo '(not set)')"
+    echo "  claude:  $(git --git-dir="$_proc_dir" remote get-url origin 2>/dev/null || echo '(not set)')"
+}
+
+# ccg push: push both repos if remotes are configured.
+ccg_push() {
+    ccg_require_root
+
+    _prod_dir="$CCG_ROOT/.git"
+    _proc_dir="$CCG_PGIT_DIR/layers/process/.git"
+    _work="$CCG_ROOT"
+
+    _product_remote=$(git --git-dir="$_prod_dir" remote get-url origin 2>/dev/null || true)
+    _process_remote=$(git --git-dir="$_proc_dir" remote get-url origin 2>/dev/null || true)
+
+    if [ -z "$_product_remote" ] && [ -z "$_process_remote" ]; then
+        echo "ccg: no remotes configured. Run 'ccg remote' first." >&2
+        exit 1
+    fi
+
+    if [ -n "$_product_remote" ]; then
+        git --git-dir="$_prod_dir" --work-tree="$_work" push -u origin HEAD
+    fi
+
+    if [ -n "$_process_remote" ]; then
+        git --git-dir="$_proc_dir" --work-tree="$_work" push -u origin HEAD
+    fi
+}
+
 # --- Main dispatch ---
 
 case "${1:-}" in
@@ -171,12 +255,12 @@ EOF
         exit 0
         ;;
     push)
-        echo "ccg: push coming in Phase 2" >&2
-        exit 1
+        ccg_push
+        exit 0
         ;;
     remote)
-        echo "ccg: remote coming in Phase 2" >&2
-        exit 1
+        ccg_remote
+        exit 0
         ;;
     "")
         pgit pp
