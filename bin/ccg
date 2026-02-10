@@ -1,0 +1,189 @@
+#!/bin/sh
+# ccg — Claude Code Git
+# Thin POSIX sh wrapper around pgit, purpose-built for Claude Code users.
+
+set -e
+
+CCG_VERSION="0.1.0"
+
+# Verify pgit is available.
+if ! command -v pgit >/dev/null 2>&1; then
+    echo "ccg: pgit not found on PATH. Install pgit first." >&2
+    exit 1
+fi
+
+# Walk up from $PWD to find the .pgit root.
+# On success, sets CCG_ROOT and CCG_PGIT_DIR.
+ccg_find_root() {
+    _d="$PWD"
+    while [ "$_d" != "/" ]; do
+        if [ -d "$_d/.pgit" ]; then
+            CCG_ROOT="$_d"
+            CCG_PGIT_DIR="$_d/.pgit"
+            return 0
+        fi
+        _d="$(dirname "$_d")"
+    done
+    return 1
+}
+
+ccg_require_root() {
+    if ! ccg_find_root; then
+        echo "ccg: not a ccg directory (no .pgit/ found). Run 'ccg init' first." >&2
+        exit 1
+    fi
+}
+
+# ccg commit: product gets the user's message; process gets sync: product@<hash>.
+# If only process has staged changes (no product commit), use the message directly.
+ccg_commit() {
+    # Parse -m value
+    _msg=""
+    _skip=false
+    for _arg in "$@"; do
+        if $_skip; then
+            _msg="$_arg"
+            _skip=false
+            continue
+        fi
+        case "$_arg" in
+            -m) _skip=true ;;
+            -m*) _msg="${_arg#-m}" ;;
+        esac
+    done
+
+    if [ -z "$_msg" ]; then
+        echo "ccg: -m <message> is required" >&2
+        exit 1
+    fi
+
+    ccg_require_root
+
+    _prod_dir="$CCG_ROOT/.git"
+    _proc_dir="$CCG_PGIT_DIR/layers/process/.git"
+    _work="$CCG_ROOT"
+
+    # Detect staged changes in each repo
+    _product_staged=false
+    _process_staged=false
+
+    if ! git --git-dir="$_prod_dir" --work-tree="$_work" diff --cached --quiet 2>/dev/null; then
+        _product_staged=true
+    fi
+    if ! git --git-dir="$_proc_dir" --work-tree="$_work" diff --cached --quiet 2>/dev/null; then
+        _process_staged=true
+    fi
+
+    if ! $_product_staged && ! $_process_staged; then
+        echo "ccg: nothing to commit" >&2
+        exit 1
+    fi
+
+    # Commit product first, then derive the process message from its hash
+    if $_product_staged; then
+        git --git-dir="$_prod_dir" --work-tree="$_work" commit -m "$_msg"
+        _hash=$(git --git-dir="$_prod_dir" rev-parse --short HEAD)
+        _proc_msg="sync: product@$_hash"
+    else
+        # No product commit — use user's message directly for process
+        _proc_msg="$_msg"
+    fi
+
+    if $_process_staged; then
+        git --git-dir="$_proc_dir" --work-tree="$_work" commit -m "$_proc_msg"
+    fi
+}
+
+# --- Main dispatch ---
+
+case "${1:-}" in
+    --version|-V)
+        echo "ccg $CCG_VERSION"
+        exit 0
+        ;;
+    --help|-h|help)
+        cat <<'EOF'
+usage: ccg <command>
+
+Commands:
+  ccg init           Set up Claude Code process separation
+  ccg add [.]        Stage files (auto-routes to product or process)
+  ccg status         Show product + process status
+  ccg commit -m MSG  Commit both repos with one message
+  ccg push           Push both repos
+  ccg remote         Create/connect GitHub remotes
+
+Run 'ccg' with no arguments for a quick overview.
+EOF
+        exit 0
+        ;;
+    init)
+        shift
+        # ccg owns its Claude Code pattern set — write it explicitly so we
+        # don't depend on the installed pgit version's registry defaults.
+        _reg="${XDG_CONFIG_HOME:-$HOME/.config}/pgit/patterns"
+        mkdir -p "$_reg"
+        cat > "$_reg/claude-code.json" << 'PATTERNS'
+{
+  "name": "claude-code",
+  "description": "Claude Code process files",
+  "patterns": [
+    "CLAUDE.md",
+    ".claude/",
+    ".claudeignore",
+    "AGENTS.md",
+    "PLAN.md",
+    "TASKS.md"
+  ]
+}
+PATTERNS
+        pgit init "$@" >/dev/null
+        cat <<'EOF'
+ccg: you're set up.
+
+  Process repo (private): CLAUDE.md, .claude/, PLAN.md, TASKS.md, AGENTS.md
+  Product repo (public):  everything else
+
+Next:
+  ccg add .          stage your files
+  ccg commit -m MSG  commit both repos
+  ccg remote         create GitHub repos (public + private)
+EOF
+        exit 0
+        ;;
+    add)
+        shift
+        pgit add "$@"
+        exit 0
+        ;;
+    status)
+        ccg_require_root
+        echo "=== product repo ==="
+        git --git-dir="$CCG_ROOT/.git" --work-tree="$CCG_ROOT" status
+        echo ""
+        echo "=== claude repo ==="
+        git --git-dir="$CCG_PGIT_DIR/layers/process/.git" --work-tree="$CCG_ROOT" status
+        exit 0
+        ;;
+    commit)
+        shift
+        ccg_commit "$@"
+        exit 0
+        ;;
+    push)
+        echo "ccg: push coming in Phase 2" >&2
+        exit 1
+        ;;
+    remote)
+        echo "ccg: remote coming in Phase 2" >&2
+        exit 1
+        ;;
+    "")
+        pgit pp
+        exit 0
+        ;;
+    *)
+        echo "ccg: unknown command '$1'. Run 'ccg --help' for usage." >&2
+        exit 1
+        ;;
+esac
