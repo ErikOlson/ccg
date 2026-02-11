@@ -110,8 +110,10 @@ ccg_remote() {
     fi
 
     _name="$(basename "$CCG_ROOT")"
+    _claude_name="${_name}-claude"
     _prod_dir="$CCG_ROOT/.git"
     _proc_dir="$CCG_PGIT_DIR/layers/process/.git"
+    _owner=$(gh api user --jq .login)
 
     _product_remote=$(git --git-dir="$_prod_dir" remote get-url origin 2>/dev/null || true)
     _process_remote=$(git --git-dir="$_proc_dir" remote get-url origin 2>/dev/null || true)
@@ -123,26 +125,28 @@ ccg_remote() {
         exit 0
     fi
 
+    # Create claude repo FIRST so product ends up on top in GitHub's activity sort
+    # (most recently created/pushed repo appears first in the list).
+    if [ -z "$_process_remote" ]; then
+        echo "ccg: creating private claude repo '$_claude_name'..."
+        gh repo create "$_claude_name" --private
+    fi
+
+    # Create product repo second — it becomes the most recently active and sits on top.
     if [ -z "$_product_remote" ]; then
         echo "ccg: creating public product repo '$_name'..."
         gh repo create "$_name" --public --source="$CCG_ROOT" --push
     fi
 
+    # Wire claude remote now that product URL exists for SSH vs HTTPS detection.
     if [ -z "$_process_remote" ]; then
-        _process_name="${_name}-process"
-        _owner=$(gh api user --jq .login)
-        echo "ccg: creating private claude repo '$_process_name'..."
-        gh repo create "$_process_name" --private
-
-        # Match the protocol the product remote uses (SSH vs HTTPS)
         _prod_url=$(git --git-dir="$_prod_dir" remote get-url origin 2>/dev/null || true)
         case "$_prod_url" in
-            git@*) _proc_url="git@github.com:$_owner/$_process_name.git" ;;
-            *)     _proc_url="https://github.com/$_owner/$_process_name.git" ;;
+            git@*) _proc_url="git@github.com:$_owner/$_claude_name.git" ;;
+            *)     _proc_url="https://github.com/$_owner/$_claude_name.git" ;;
         esac
         git --git-dir="$_proc_dir" remote add origin "$_proc_url"
 
-        # Push if process repo has commits
         if git --git-dir="$_proc_dir" rev-parse HEAD >/dev/null 2>&1; then
             git --git-dir="$_proc_dir" --work-tree="$CCG_ROOT" push -u origin HEAD
         fi
@@ -271,8 +275,8 @@ PATTERNS
         cat <<'EOF'
 ccg: you're set up.
 
-  Process repo (private): CLAUDE.md, .claude/, PLAN.md, TASKS.md, AGENTS.md
-  Product repo (public):  everything else
+  Claude repo (private): CLAUDE.md, .claude/, PLAN.md, TASKS.md, AGENTS.md
+  Product repo (public): everything else
 
 Next:
   ccg add .          stage your files
