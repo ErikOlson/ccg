@@ -1,0 +1,46 @@
+#compdef ccg
+
+# ccg zsh completion
+
+_ccg_complete() {
+    local curcontext="$curcontext" state line
+    typeset -A opt_args
+
+    _arguments -C \
+        '(-V --version)'{-V,--version}'[show version]' \
+        '(-h --help)'{-h,--help}'[show help]' \
+        '1: :->cmd' \
+        '*: :->args'
+
+    case $state in
+        cmd)
+            local -a ccg_cmds
+            ccg_cmds=(
+                'init:set up Claude Code process separation'
+                'add:stage files (auto-routes to product or claude repo)'
+                'status:show status of both repos'
+                'commit:commit both repos with one message'
+                'push:push both repos'
+                'remote:create/connect GitHub remotes'
+            )
+            _describe 'command' ccg_cmds
+            ;;
+        args)
+            case ${line[1]} in
+                add)
+                    _files
+                    ;;
+                commit)
+                    _arguments \
+                        '-m[commit message]:message:'
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+if [[ -z "$service" ]]; then
+    compdef _ccg_complete ccg
+else
+    _ccg_complete "$@"
+fi

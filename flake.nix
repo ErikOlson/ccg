@@ -16,11 +16,16 @@
             version = "0.1.0";
             src = ./.;
 
+            nativeBuildInputs = [ pkgs.installShellFiles ];
+
             dontBuild = true;
 
             installPhase = ''
               mkdir -p $out/bin
               install -m 755 bin/ccg $out/bin/ccg
+
+              installShellCompletion --bash --name ccg completions/ccg.bash
+              installShellCompletion --zsh completions/_ccg
             '';
 
             meta = {
