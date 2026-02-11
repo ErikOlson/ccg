@@ -153,6 +153,40 @@ ccg_remote() {
     echo "  claude:  $(git --git-dir="$_proc_dir" remote get-url origin 2>/dev/null || echo '(not set)')"
 }
 
+# ccg overview (no args): branch, clean/dirty, last commit for both repos.
+ccg_overview() {
+    ccg_require_root
+
+    _prod_dir="$CCG_ROOT/.git"
+    _proc_dir="$CCG_PGIT_DIR/layers/process/.git"
+    _work="$CCG_ROOT"
+
+    _prod_branch=$(git --git-dir="$_prod_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "no commits")
+    _proc_branch=$(git --git-dir="$_proc_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "no commits")
+
+    if git --git-dir="$_prod_dir" --work-tree="$_work" diff --quiet 2>/dev/null && \
+       git --git-dir="$_prod_dir" --work-tree="$_work" diff --cached --quiet 2>/dev/null; then
+        _prod_status="clean"
+    else
+        _prod_status="dirty"
+    fi
+
+    if git --git-dir="$_proc_dir" --work-tree="$_work" diff --quiet 2>/dev/null && \
+       git --git-dir="$_proc_dir" --work-tree="$_work" diff --cached --quiet 2>/dev/null; then
+        _proc_status="clean"
+    else
+        _proc_status="dirty"
+    fi
+
+    _prod_commit=$(git --git-dir="$_prod_dir" log --oneline -1 2>/dev/null || echo "(no commits)")
+    _proc_commit=$(git --git-dir="$_proc_dir" log --oneline -1 2>/dev/null || echo "(no commits)")
+
+    echo "product repo  [$_prod_branch] $_prod_status"
+    echo "  $_prod_commit"
+    echo "claude repo   [$_proc_branch] $_proc_status"
+    echo "  $_proc_commit"
+}
+
 # ccg push: push both repos if remotes are configured.
 ccg_push() {
     ccg_require_root
@@ -187,15 +221,27 @@ case "${1:-}" in
         ;;
     --help|-h|help)
         cat <<'EOF'
-usage: ccg <command>
+ccg — Claude Code Git
+
+Keep Claude Code files out of your product repo. Two repos, one working
+directory: product (public) and claude (private).
+
+Usage: ccg <command>
 
 Commands:
-  ccg init           Set up Claude Code process separation
-  ccg add [.]        Stage files (auto-routes to product or process)
-  ccg status         Show product + process status
-  ccg commit -m MSG  Commit both repos with one message
-  ccg push           Push both repos
-  ccg remote         Create/connect GitHub remotes
+  init           Set up Claude Code process separation in current directory
+  add [files]    Stage files — auto-routes each file to product or claude repo
+  status         Show status of both repos
+  commit -m MSG  Commit both repos with one message
+  push           Push both repos to GitHub
+  remote         Create GitHub repos (public product, private claude)
+
+Examples:
+  ccg init                    # new project — creates both repos
+  ccg add .                   # stage everything, correctly routed
+  ccg commit -m "add login"   # product gets your message, claude gets a hash ref
+  ccg remote                  # one command to set up GitHub
+  ccg push                    # push both
 
 Run 'ccg' with no arguments for a quick overview.
 EOF
@@ -263,7 +309,7 @@ EOF
         exit 0
         ;;
     "")
-        pgit pp
+        ccg_overview
         exit 0
         ;;
     *)

@@ -23,11 +23,11 @@ teardown() {
     rm -rf "$TEST_DIR"
 }
 
-@test "ccg with no args shows product and process" {
+@test "ccg with no args shows product repo and claude repo" {
     run ccg
     [ "$status" -eq 0 ]
-    [[ "$output" == *"product"* ]]
-    [[ "$output" == *"process"* ]]
+    [[ "$output" == *"product repo"* ]]
+    [[ "$output" == *"claude repo"* ]]
 }
 
 @test "ccg with no args shows last commit for each repo" {

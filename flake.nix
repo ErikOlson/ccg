@@ -26,6 +26,7 @@
 
               installShellCompletion --bash --name ccg completions/ccg.bash
               installShellCompletion --zsh completions/_ccg
+              installShellCompletion --fish completions/ccg.fish
             '';
 
             meta = {
